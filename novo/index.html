@@ -368,7 +368,7 @@ function abrirComissoes(page) {
   if (comPage !== page) { comPage = page; try { fr.contentWindow.postMessage({ page }, location.origin); } catch (e) { } }
 }
 let rq = false;
-function render() { if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; draw(); }); }
+function render() { if (rq) return; rq = true; setTimeout(() => { rq = false; draw(); }, 0); }
 function draw() {
   const pendAbertas = S.pendencias.filter(p => p.status !== 'resolvida').length;
   const nAl = alertas().filter(a => a.n === 'alto').length;
