@@ -1015,14 +1015,41 @@ function exportar() {
   const blob = new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `backup-financeiro-sandra-${today()}.json`; a.click();
 }
+// Junta colaboradores e lançamentos semanais no documento do app de comissões (dados/principal),
+// sem apagar o que já existe. Colaboradores são reconhecidos pelo primeiro nome.
+async function importarComissoes(c) {
+  const ref = db.collection('dados').doc('principal');
+  const snap = await ref.get(); const st = snap.exists ? snap.data() : {};
+  st.colaboradores = st.colaboradores || []; st.lancamentos = st.lancamentos || [];
+  const chave = n => String(n || '').trim().split(/\s+/)[0].toLowerCase();
+  let novos = 0, lancs = 0;
+  for (const col of (c.colaboradores || [])) {
+    const ex = st.colaboradores.find(x => chave(x.nome) === chave(col.nome));
+    if (ex) { if (col.meta != null) ex.meta = col.meta; }
+    else { st.colaboradores.push({ id: Date.now() + '' + novos, valorHE: 0, inss: 0, cafe: 0, tempo: 0, ...col }); novos++; }
+  }
+  for (const l of (c.lancamentos || [])) {
+    const col = st.colaboradores.find(x => chave(x.nome) === chave(l.colNome)); if (!col) continue;
+    st.lancamentos = st.lancamentos.filter(x => !(x.colId === col.id && x.dataIni === l.dataIni));
+    st.lancamentos.push({ id: 'imp-' + col.id + '-' + l.dataIni, colId: col.id, nomeColab: col.nome, data: l.dataIni, dataIni: l.dataIni, dataFim: l.dataFim, vendas: l.vendas, meta: l.meta, vale: 0, faltasNum: 0, falta: false, obs: l.obs || '' });
+    lancs++;
+  }
+  await ref.set(JSON.parse(JSON.stringify(st)));
+  return { novos, lancs };
+}
 function importar(inp) {
   const f = inp.files[0]; if (!f) return;
   const rd = new FileReader();
   rd.onload = async () => {
     try {
       const d = JSON.parse(rd.result); let n = 0;
-      if (!confirm('Importar o backup? Registros com o mesmo ID serão substituídos.')) return;
+      if (!confirm('Importar este arquivo? Registros com o mesmo código serão substituídos (importar duas vezes não duplica).')) return;
       for (const c of COLS) for (const o of (d[c] || [])) { await Store.save(c, o); n++; }
+      if (d.comissoes && !DEMO) {
+        const r = await importarComissoes(d.comissoes);
+        alert(`Importação concluída:\n• ${n} registros do financeiro\n• ${r.lancs} lançamento(s) semanais nas comissões\n• ${r.novos} colaborador(a)(es) novo(s)\n\nA página vai recarregar.`);
+        location.reload(); return;
+      }
       toast(n + ' registros importados');
     } catch (e) { alert('Arquivo inválido: ' + e.message); }
   };
@@ -1040,7 +1067,7 @@ R.config = () => {
     <div class="card"><h2>Orçamento mensal</h2>${table(['Categoria', N('Valor')], orc.map(([k, v]) => [esc(k), fmt(v)]), orc.length ? ['Total', fmt(sum(orc, x => x[1]))] : null)}<div style="margin-top:12px"><button class="btn" onclick="editarOrcamento()">Editar orçamento</button></div></div>
   </div>
   <div class="card"><h2>Backup</h2><p class="muted">Baixe uma cópia de todos os dados uma vez por mês e guarde fora do sistema.</p>
-    <div class="bar"><button class="btn sec" onclick="exportar()">Baixar backup</button><label class="btn sec">Importar backup<input type="file" accept=".json" style="display:none" onchange="importar(this)"></label></div></div>
+    <div class="bar"><button class="btn sec" onclick="exportar()">Baixar backup</button><label class="btn sec">Importar backup ou lançamentos<input type="file" accept=".json" style="display:none" onchange="importar(this)"></label></div></div>
   <div class="card"><h2>Sobre</h2><p class="muted">${DEMO ? 'Modo demonstração (dados só neste navegador).' : 'Conectado ao Firebase (projeto ' + esc(firebaseConfig.projectId) + '). Dados em financeiro/loja.'}<br>No celular: abra o endereço no navegador e use "Adicionar à tela inicial" para ter o ícone como um aplicativo.</p></div>`;
 };
 
