@@ -348,10 +348,22 @@ const I = {
    - bônus = valor fixo da maior faixa de bônus atingida
    - faltas = dias × (salário fixo ÷ 30)
    ================================================================== */
-function faixaCom(vendas,meta){ if(!meta||meta<=0) return null; const p=vendas/meta*100; return [...state.faixasCom].sort((a,b)=>b.meta-a.meta).find(f=>p>=f.meta)||null; }
+const EPS=1e-9;
+function faixaCom(vendas,meta){ if(!meta||meta<=0) return null; const p=vendas/meta*100; return [...state.faixasCom].sort((a,b)=>b.meta-a.meta).find(f=>p>=f.meta-EPS)||null; }
 function comissaoSemana(vendas,meta){ const f=faixaCom(vendas,meta); return f ? vendas*f.com/100 : 0; }
-function bonusSemana(vendas,meta){ if(!meta||meta<=0) return 0; const p=vendas/meta*100; const f=[...state.faixasBonus].sort((a,b)=>b.meta-a.meta).find(f=>p>=f.meta); return f?Number(f.bonus):0; }
+function bonusSemana(vendas,meta){ if(!meta||meta<=0) return 0; const p=vendas/meta*100; const f=[...state.faixasBonus].sort((a,b)=>b.meta-a.meta).find(f=>p>=f.meta-EPS); return f?Number(f.bonus):0; }
 const inicioLanc = l => l.dataIni||l.data||'';
+/* Escada de metas: Meta 1 = meta da semana; Meta 2 = Meta 1 + sobe2%; Meta 3 = Meta 2 + sobe3%.
+   As faixas usadas no cálculo (faixasCom/faixasBonus, em % da Meta 1) são geradas a partir dela. */
+const r4 = x => Math.round(x*1e4)/1e4;
+function gatilhos(e){ const t2=r4(100*(1+e.sobe2/100)); return [100, t2, r4(t2*(1+e.sobe3/100))]; }
+function aplicarEscada(s){
+  const e=s.escada, t=gatilhos(e);
+  s.faixasCom=[...e.abaixo.filter(f=>f.meta<100).map(f=>({meta:Number(f.meta),com:Number(f.com)})), ...e.niveis.map((n,i)=>({meta:t[i],com:Number(n.com)}))];
+  s.faixasBonus=e.niveis.map((n,i)=>({meta:t[i],bonus:Number(n.bonus)})).filter(f=>f.bonus>0);
+}
+function metasReais(meta){ const t=gatilhos(state.escada); return t.map(x=>meta*x/100); }
+function nivelAtingido(vendas,meta){ if(!meta) return 0; const p=vendas/meta*100, t=gatilhos(state.escada); let n=0; t.forEach((x,i)=>{ if(p>=x-EPS) n=i+1; }); return n; }
 const lancsMes = (colId,ym) => state.lancamentos.filter(l=>l.colId===colId && inicioLanc(l).startsWith(ym));
 function ajustes(colId,ym){ return state.descontosMes[colId+'_'+ym]||{}; }
 function calcMes(colId,ym){
@@ -384,6 +396,16 @@ function normalizar(s){
   s.colaboradores=s.colaboradores||[]; s.lancamentos=s.lancamentos||[]; s.descontosMes=s.descontosMes||{}; s.ferias=s.ferias||[];
   if(!s.faixasCom||!s.faixasCom.length) s.faixasCom=FAIXAS_COM_PADRAO.map(f=>({...f}));
   if(!s.faixasBonus||!s.faixasBonus.length) s.faixasBonus=FAIXAS_BONUS_PADRAO.map(f=>({...f}));
+  if(!s.escada){
+    // primeira vez: monta a escada a partir das faixas que já existiam
+    const acima=[...s.faixasCom].filter(f=>f.meta>=100).sort((a,b)=>a.meta-b.meta);
+    const bon=[...s.faixasBonus].filter(f=>f.meta>=100).sort((a,b)=>a.meta-b.meta);
+    const padraoCom=[1,1.5,2], padraoBon=[25,37.5,50];
+    s.escada={ sobe2:20, sobe3:30,
+      niveis:[0,1,2].map(i=>({com:acima[i]?Number(acima[i].com):padraoCom[i], bonus:bon[i]?Number(bon[i].bonus):padraoBon[i]})),
+      abaixo:s.faixasCom.filter(f=>f.meta<100).map(f=>({meta:Number(f.meta),com:Number(f.com)})) };
+  }
+  aplicarEscada(s);
   return s;
 }
 function statusSync(t){ const el=$('sync'); if(el) el.textContent=t; }
@@ -557,10 +579,12 @@ function previaFolha(){
   document.querySelectorAll('#folha .linha[data-col]').forEach(row=>{
     const v=num(row.querySelector('[name=vendas]').value), m=num(row.querySelector('[name=meta]').value);
     tv+=v; const com=comissaoSemana(v,m)+bonusSemana(v,m); tc+=com;
-    const p=m?v/m*100:0;
-    row.querySelector('.barra').innerHTML = !v ? '<span class="muted" style="font-size:13px">sem vendas lançadas</span>' :
-      !m ? '<span class="muted" style="font-size:13px">sem meta: sem comissão</span>' :
-      `<div class="meta-bar"><i class="${p>=100?'bateu':''}" style="width:${Math.min(p,100)}%"></i></div><div class="meta-txt"><span>${pct(p)} da meta</span><b class="money">${brl(com)}</b></div>`;
+    const mr=m?metasReais(m):null, nv=nivelAtingido(v,m);
+    const prox = mr && nv<3 ? mr[nv] : null;
+    const larg = !mr ? 0 : nv>=3 ? 100 : Math.min(100, (nv*100 + (v-(nv?mr[nv-1]:0))/(mr[nv]-(nv?mr[nv-1]:0))*100)/3);
+    row.querySelector('.barra').innerHTML = !m ? '<span class="muted" style="font-size:13px">sem meta: sem comissão</span>' :
+      !v ? `<span class="muted" style="font-size:13px">Metas: ${mr.map((x,i)=>(i+1)+'ª '+brl(x).replace(',00','')).join(' · ')}</span>` :
+      `<div class="meta-bar" title="Metas: ${mr.map(x=>brl(x)).join(' / ')}"><i class="${nv?'bateu':''}" style="width:${Math.max(2,larg)}%"></i></div><div class="meta-txt"><span>${nv?nv+'ª meta batida':pct(v/m*100)+' da 1ª meta'}${prox?' · faltam '+brl(prox-v).replace(',00','')+' p/ '+(nv+1)+'ª':''}</span><b class="money">${brl(com)}</b></div>`;
   });
   $('totFolha').innerHTML=`Total da semana: <b class="money" style="color:var(--ink)">${brl(tv)}</b> em vendas · <b class="money pos">${brl(tc)}</b> em comissões e bônus`;
 }
@@ -894,41 +918,53 @@ function apagarColab(id){
 
 /* ============================ REGRAS DE COMISSÃO ============================ */
 R.regras = () => {
-  const fc=[...state.faixasCom].sort((a,b)=>a.meta-b.meta), fb=[...state.faixasBonus].sort((a,b)=>a.meta-b.meta);
-  const ex=10000;
+  const e=state.escada, t=gatilhos(e), ex=10000, mr=t.map(x=>ex*x/100);
+  const nomes=['1ª meta','2ª meta','3ª meta'];
+  const abaixo=[...e.abaixo].sort((a,b)=>a.meta-b.meta);
   return `
-  <div class="head"><div><h1>Regras de comissão</h1><p>A cada semana, o sistema compara as vendas com a meta. A maior faixa alcançada define a porcentagem de comissão sobre as vendas e o bônus fixo.</p></div></div>
-  <div class="grid2">
-    <div class="panel"><h2>Comissão sobre as vendas</h2><p class="sub">Exemplo com meta de ${brl(ex)}.</p>
-      <table><thead><tr><th>Atingiu a meta em</th><th class="n">Comissão</th><th class="n hide-m">Exemplo</th><th></th></tr></thead><tbody>
-      ${fc.map(f=>`<tr><td>${f.meta}% ou mais</td><td class="n"><b>${String(f.com).replace('.',',')}%</b></td><td class="n money hide-m">${brl(ex*f.meta/100*f.com/100)}</td><td class="act"><button class="icon-btn" title="Remover faixa" onclick="remFaixa('faixasCom',${f.meta})">${I.lixo}</button></td></tr>`).join('')}
-      </tbody></table>
-      <form style="display:flex;gap:8px;margin-top:14px;align-items:flex-end;flex-wrap:wrap" onsubmit="event.preventDefault();addFaixa('faixasCom',this)">
-        <label class="field" style="flex:1;margin:0"><span>% da meta</span><input class="inp num" name="a" inputmode="decimal" placeholder="100"></label>
-        <label class="field" style="flex:1;margin:0"><span>% de comissão</span><input class="inp num" name="b" inputmode="decimal" placeholder="1,0"></label>
-        <button class="btn sec">Adicionar faixa</button></form>
-    </div>
-    <div class="panel"><h2>Bônus por meta</h2><p class="sub">Valor fixo pago na semana em que a faixa é alcançada.</p>
-      <table><thead><tr><th>Atingiu a meta em</th><th class="n">Bônus</th><th></th></tr></thead><tbody>
-      ${fb.map(f=>`<tr><td>${f.meta}% ou mais</td><td class="n money"><b>${brl(f.bonus)}</b></td><td class="act"><button class="icon-btn" title="Remover faixa" onclick="remFaixa('faixasBonus',${f.meta})">${I.lixo}</button></td></tr>`).join('')}
-      </tbody></table>
-      <form style="display:flex;gap:8px;margin-top:14px;align-items:flex-end;flex-wrap:wrap" onsubmit="event.preventDefault();addFaixa('faixasBonus',this)">
-        <label class="field" style="flex:1;margin:0"><span>% da meta</span><input class="inp num" name="a" inputmode="decimal" placeholder="100"></label>
-        <label class="field" style="flex:1;margin:0"><span>Bônus (R$)</span><input class="inp num" name="b" inputmode="decimal" placeholder="25,00"></label>
-        <button class="btn sec">Adicionar faixa</button></form>
-    </div>
-  </div>
-  <div class="panel"><h2>Simular uma semana</h2><p class="sub">Digite vendas e meta para ver quanto daria.</p>
-    <form style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end" oninput="simular(this)" onsubmit="event.preventDefault()">
-      <label class="field" style="margin:0;flex:1;min-width:140px"><span>Vendas</span><input class="inp num" name="v" inputmode="decimal" placeholder="0,00"></label>
-      <label class="field" style="margin:0;flex:1;min-width:140px"><span>Meta</span><input class="inp num" name="m" inputmode="decimal" placeholder="0,00"></label>
-      <div id="simOut" style="flex:2;min-width:220px;padding-bottom:10px" class="muted">—</div></form></div>`;
+  <div class="head"><div><h1>Regras de comissão</h1><p>A 1ª meta é a meta da semana de cada vendedora. A 2ª e a 3ª são calculadas a partir dela. A comissão é sobre tudo o que ela vendeu na semana, mais o bônus da maior meta que ela bateu.</p></div></div>
+  <form class="panel" onsubmit="event.preventDefault();salvarEscada(this)" oninput="previaEscada(this)">
+    <h2>Metas e quanto cada uma paga</h2><p class="sub">Exemplo com 1ª meta de ${brl(ex)}.</p>
+    <div class="tw"><table><thead><tr><th>Meta</th><th>Como é calculada</th><th class="n">Exemplo</th><th class="n">Comissão sobre as vendas</th><th class="n">Bônus</th></tr></thead><tbody>
+      <tr><td><b>1ª meta</b></td><td>a meta da semana</td><td class="n money" id="ex0">${brl(mr[0])}</td>
+        <td class="n"><input class="inp num" style="width:90px" name="c0" inputmode="decimal" value="${String(e.niveis[0].com).replace('.',',')}"> %</td><td class="n"><input class="inp num" style="width:110px" name="b0" inputmode="decimal" value="${fmtInp(e.niveis[0].bonus)}"></td></tr>
+      <tr><td><b>2ª meta</b></td><td>1ª meta + <input class="inp num" style="width:70px;display:inline-block" name="s2" inputmode="decimal" value="${String(e.sobe2).replace('.',',')}"> %</td><td class="n money" id="ex1">${brl(mr[1])}</td>
+        <td class="n"><input class="inp num" style="width:90px" name="c1" inputmode="decimal" value="${String(e.niveis[1].com).replace('.',',')}"> %</td><td class="n"><input class="inp num" style="width:110px" name="b1" inputmode="decimal" value="${fmtInp(e.niveis[1].bonus)}"></td></tr>
+      <tr><td><b>3ª meta</b></td><td>2ª meta + <input class="inp num" style="width:70px;display:inline-block" name="s3" inputmode="decimal" value="${String(e.sobe3).replace('.',',')}"> %</td><td class="n money" id="ex2">${brl(mr[2])}</td>
+        <td class="n"><input class="inp num" style="width:90px" name="c2" inputmode="decimal" value="${String(e.niveis[2].com).replace('.',',')}"> %</td><td class="n"><input class="inp num" style="width:110px" name="b2" inputmode="decimal" value="${fmtInp(e.niveis[2].bonus)}"></td></tr>
+    </tbody></table></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap">
+      <span class="muted" style="font-size:13px">Ao salvar, as comissões de todas as semanas já lançadas são recalculadas com as novas regras.</span>
+      <button class="btn">Salvar regras</button></div>
+  </form>
+  <div class="grid2" style="margin-top:16px">
+    <div class="panel"><h2>Abaixo da 1ª meta</h2><p class="sub">Comissão para quem chega perto da 1ª meta, sem bônus. Deixe vazio se não houver.</p>
+      ${abaixo.length?`<table><tbody>${abaixo.map(f=>`<tr><td>${String(f.meta).replace('.',',')}% da 1ª meta (${brl(ex*f.meta/100)} no exemplo)</td><td class="n"><b>${String(f.com).replace('.',',')}%</b></td><td class="act"><button class="icon-btn" title="Remover" onclick="remAbaixo(${f.meta})">${I.lixo}</button></td></tr>`).join('')}</tbody></table>`:'<div class="muted" style="font-size:14px">Nenhuma comissão abaixo da 1ª meta.</div>'}
+      <form style="display:flex;gap:8px;margin-top:14px;align-items:flex-end;flex-wrap:wrap" onsubmit="event.preventDefault();addAbaixo(this)">
+        <label class="field" style="flex:1;margin:0"><span>% da 1ª meta</span><input class="inp num" name="a" inputmode="decimal" placeholder="90"></label>
+        <label class="field" style="flex:1;margin:0"><span>% de comissão</span><input class="inp num" name="b" inputmode="decimal" placeholder="0,5"></label>
+        <button class="btn sec">Adicionar</button></form></div>
+    <div class="panel"><h2>Simular uma semana</h2><p class="sub">Digite as vendas e a 1ª meta.</p>
+      <form style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end" oninput="simular(this)" onsubmit="event.preventDefault()">
+        <label class="field" style="margin:0;flex:1;min-width:120px"><span>Vendas</span><input class="inp num" name="v" inputmode="decimal" placeholder="0,00"></label>
+        <label class="field" style="margin:0;flex:1;min-width:120px"><span>1ª meta</span><input class="inp num" name="m" inputmode="decimal" placeholder="0,00"></label></form>
+      <div id="simOut" style="margin-top:14px" class="muted">—</div></div>
+  </div>`;
 };
-function simular(f){ const v=num(f.v.value), m=num(f.m.value); if(!v||!m){$('simOut').textContent='—';return;} const fx=faixaCom(v,m), c=comissaoSemana(v,m), b=bonusSemana(v,m);
-  $('simOut').innerHTML=`${pct(v/m*100)} da meta · ${fx?'faixa de '+fx.meta+'% ('+String(fx.com).replace('.',',')+'%)':'abaixo da primeira faixa'}<br><b class="money pos" style="font-size:18px">${brl(c+b)}</b> <span class="muted">(${brl(c)} de comissão + ${brl(b)} de bônus)</span>`; }
-function addFaixa(k,f){ const a=num(f.a.value), b=num(f.b.value); if(!a||!b){toast('Preencha os dois campos.',true);return;}
-  state[k]=state[k].filter(x=>x.meta!==a); state[k].push(k==='faixasCom'?{meta:a,com:b}:{meta:a,bonus:b}); salvar(); render(); toast('Faixa salva'); }
-function remFaixa(k,meta){ confirmar('Remover faixa de '+meta+'%?','As comissões de todas as semanas são recalculadas com as faixas restantes, inclusive as de meses anteriores.','Remover',()=>{ state[k]=state[k].filter(x=>x.meta!==meta); salvar(); render(); toast('Faixa removida'); }); }
+function lerEscada(f){ return { sobe2:num(f.s2.value), sobe3:num(f.s3.value), niveis:[0,1,2].map(i=>({com:num(f['c'+i].value), bonus:num(f['b'+i].value)})), abaixo:state.escada.abaixo }; }
+function previaEscada(f){ const t=gatilhos(lerEscada(f)); t.forEach((x,i)=>{ const el=$('ex'+i); if(el) el.textContent=brl(10000*x/100); }); }
+function salvarEscada(f){
+  const e=lerEscada(f);
+  if(e.sobe2<=0||e.sobe3<=0){ toast('O aumento da 2ª e da 3ª meta precisa ser maior que zero.',true); return; }
+  if(e.niveis.some(n=>!n.com)){ toast('Informe a comissão das três metas.',true); return; }
+  state.escada=e; aplicarEscada(state); salvar(); render(); toast('Regras salvas');
+}
+function addAbaixo(f){ const a=num(f.a.value), b=num(f.b.value); if(!a||!b){toast('Preencha os dois campos.',true);return;} if(a>=100){toast('Use um valor abaixo de 100% (a 1ª meta já tem a própria comissão).',true);return;}
+  state.escada.abaixo=state.escada.abaixo.filter(x=>x.meta!==a); state.escada.abaixo.push({meta:a,com:b}); aplicarEscada(state); salvar(); render(); toast('Faixa salva'); }
+function remAbaixo(meta){ confirmar('Remover a faixa de '+String(meta).replace('.',',')+'%?','As semanas já lançadas são recalculadas sem essa faixa.','Remover',()=>{ state.escada.abaixo=state.escada.abaixo.filter(x=>x.meta!==meta); aplicarEscada(state); salvar(); render(); toast('Faixa removida'); }); }
+function simular(f){ const v=num(f.v.value), m=num(f.m.value); if(!v||!m){$('simOut').textContent='—';return;}
+  const mr=metasReais(m), nv=nivelAtingido(v,m), c=comissaoSemana(v,m), b=bonusSemana(v,m), fx=faixaCom(v,m);
+  $('simOut').innerHTML=`Metas: ${mr.map((x,i)=>(i+1)+'ª '+brl(x)).join(' · ')}<br>${nv?`Bateu a <b>${nv}ª meta</b>`:fx?`Chegou a ${pct(v/m*100)} da 1ª meta`:'Não chegou à 1ª meta'}: ${fx?String(fx.com).replace('.',',')+'% de '+brl(v):'sem comissão'}<br><b class="money pos" style="font-size:20px">${brl(c+b)}</b> <span class="muted">(${brl(c)} de comissão + ${brl(b)} de bônus)</span>`; }
 
 /* ============================ MINHA CONTA ============================ */
 R.conta = () => `
