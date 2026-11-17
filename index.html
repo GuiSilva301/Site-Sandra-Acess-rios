@@ -368,6 +368,13 @@ function calcMes(colId,ym){
   const liquido=base-inss-vale-faltas-outros;
   return {col,semanas:ls,vendas,metas,comissao,bonus,horasExtras,valorHE,cafe,tempo,fixo,inss,vale,faltasDias,valorDia,faltas,outros,outrosDesc:a.outrosDesc||'',base,liquido};
 }
+// Detalhe dos vales (um por data) e das datas de falta, para o holerite
+function detalheDescontos(r){
+  const ord=[...r.semanas].sort((a,b)=>inicioLanc(a).localeCompare(inicioLanc(b)));
+  const vales=ord.filter(l=>Number(l.vale)>0).map(l=>({data: l.tipo ? br(inicioLanc(l)) : 'semana de '+brCurto(inicioLanc(l))+' a '+brCurto(l.dataFim), curta: l.tipo ? brCurto(inicioLanc(l)) : brCurto(inicioLanc(l))+' a '+brCurto(l.dataFim), valor:Number(l.vale), obs:l.obs&&l.tipo?l.obs:''}));
+  const faltas=[]; ord.filter(l=>Number(l.faltasNum)>0).forEach(l=>{ if(l.tipo) faltas.push(brCurto(inicioLanc(l))); else faltas.push(l.faltasNum+' na semana de '+brCurto(inicioLanc(l))); });
+  return {vales,faltas};
+}
 const ativos = () => state.colaboradores.filter(c=>c.ativo!==false);
 function noMes(ym){ return state.colaboradores.filter(c=>c.ativo!==false || lancsMes(c.id,ym).length || state.descontosMes[c.id+'_'+ym]); }
 
@@ -650,6 +657,7 @@ R.fechamento = () => {
   const total=soma(rs,r=>r.liquido);
   const hol=rs.map(r=>{
     const c=r.col, aberto=V.abertos[c.id], a=ajustes(c.id,ym);
+    const dd=detalheDescontos(r);
     const avs=r.semanas.filter(l=>l.tipo).sort((x,y)=>inicioLanc(x).localeCompare(inicioLanc(y)));
     const avHtml=avs.map(l=>`<div class="ln"><span>${brCurto(inicioLanc(l))} · ${l.tipo==='vale'?'Vale':'Falta'}${l.obs?' <span class="muted">('+esc(l.obs)+')</span>':''}</span><span class="money neg">${l.tipo==='vale'?'− '+brl(l.vale):'− '+brl(r.valorDia)}</span></div>`).join('');
     const sem=r.semanas.filter(l=>!l.tipo).sort((x,y)=>inicioLanc(x).localeCompare(inicioLanc(y))).map(l=>{
@@ -672,15 +680,15 @@ R.fechamento = () => {
           ${r.tempo?`<div class="ln"><span>Bônus por tempo de casa</span><span class="money pos">${brl(r.tempo)}</span></div>`:''}
           <div class="bloco-t">Descontos</div>
           <div class="ln"><span>INSS</span><span class="money neg">− ${brl(r.inss)}</span></div>
-          <div class="ln"><span>Vales</span><span class="money neg">− ${brl(r.vale)}</span></div>
-          <div class="ln"><span>Faltas (${r.faltasDias} dia${r.faltasDias!==1?'s':''} × ${brl(r.valorDia)})</span><span class="money neg">− ${brl(r.faltas)}</span></div>
+          ${dd.vales.length?dd.vales.map(v=>`<div class="ln"><span>Vale em ${v.data}${v.obs?' <span class="muted">('+esc(v.obs)+')</span>':''}</span><span class="money neg">− ${brl(v.valor)}</span></div>`).join(''):`<div class="ln"><span>Vales</span><span class="money neg">− ${brl(0)}</span></div>`}
+          <div class="ln"><span>Faltas (${r.faltasDias} dia${r.faltasDias!==1?'s':''} × ${brl(r.valorDia)})${dd.faltas.length?`<br><span class="muted" style="font-size:13px">${dd.faltas.join(', ')}</span>`:''}</span><span class="money neg">− ${brl(r.faltas)}</span></div>
           ${r.outros?`<div class="ln"><span>Outros${r.outrosDesc?' ('+esc(r.outrosDesc)+')':''}</span><span class="money neg">− ${brl(r.outros)}</span></div>`:''}
           <div class="ln tot"><span>Salário líquido</span><span class="money">${brl(r.liquido)}</span></div>
           <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn sec sm" onclick="pdfHolerite(['${c.id}'])">${I.pdf}Baixar holerite (PDF)</button></div>
         </div>
         <div>
           <div class="bloco-t">Semanas do mês</div>${sem}
-          ${avHtml?`<div class="bloco-t">Vales e faltas</div>${avHtml}`:''}
+
           <form class="ajustes" style="margin-top:16px" onsubmit="event.preventDefault();salvarAjustes('${c.id}',this)">
             <div class="bloco-t">Ajustes do mês</div>
             <div class="row3">
@@ -731,14 +739,9 @@ function pdfHolerite(ids){
     const ln=(a,b,neg)=>{ doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(60,50,65); doc.text(tira(a),ML,y); doc.setTextColor(neg?178:37,neg?58:26,neg?72:43); doc.text((neg?'- ':'')+real(b),MR,y,{align:'right'}); doc.setDrawColor(230,224,232); doc.setLineWidth(0.2); doc.line(ML,y+2,MR,y+2); y+=7; };
     sec('A RECEBER'); ln('Salario fixo',r.fixo); ln('Comissoes',r.comissao); ln('Bonus por meta',r.bonus);
     if(r.valorHE) ln(`Horas extras (${r.horasExtras} h)`,r.valorHE); if(r.cafe) ln('Cafe',r.cafe); if(r.tempo) ln('Bonus por tempo de casa',r.tempo);
-    y+=3; sec('DESCONTOS'); ln('INSS',r.inss,true); if(r.vale) ln('Vales',r.vale,true); if(r.faltas) ln(`Faltas (${r.faltasDias} dia(s))`,r.faltas,true); if(r.outros) ln('Outros'+(r.outrosDesc?' ('+r.outrosDesc+')':''),r.outros,true);
+    y+=3; sec('DESCONTOS'); ln('INSS',r.inss,true); const dd=detalheDescontos(r); dd.vales.forEach(v=>ln('Vale em '+v.data+(v.obs?' ('+v.obs+')':''),v.valor,true)); if(r.faltas) ln(`Faltas (${r.faltasDias} dia(s): ${dd.faltas.join(', ')})`,r.faltas,true); if(r.outros) ln('Outros'+(r.outrosDesc?' ('+r.outrosDesc+')':''),r.outros,true);
     y+=2; doc.setFillColor(243,233,240); doc.rect(ML,y-5,MR-ML,11,'F');
     doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(37,26,43); doc.text('Salario liquido',ML+3,y+2.5); doc.text(real(r.liquido),MR-3,y+2.5,{align:'right'}); y+=16;
-    if(r.semanas.some(l=>l.tipo)){ sec('VALES E FALTAS');
-      r.semanas.filter(l=>l.tipo).sort((x,z)=>inicioLanc(x).localeCompare(inicioLanc(z))).forEach(l=>{
-        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(60,50,65);
-        doc.text(tira(`${br(inicioLanc(l))}   ${l.tipo==='vale'?'Vale':'Falta'}${l.obs?' ('+l.obs+')':''}`),ML,y);
-        doc.text('- '+real(l.tipo==='vale'?l.vale:r.valorDia),MR,y,{align:'right'}); y+=5.5; }); y+=3; }
     if(r.semanas.some(l=>!l.tipo)){ sec('SEMANAS DO MES');
       r.semanas.filter(l=>!l.tipo).sort((x,z)=>inicioLanc(x).localeCompare(inicioLanc(z))).forEach(l=>{
         const cm=comissaoSemana(Number(l.vendas)||0,Number(l.meta)||0)+bonusSemana(Number(l.vendas)||0,Number(l.meta)||0);
