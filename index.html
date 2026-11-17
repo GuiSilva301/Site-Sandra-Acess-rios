@@ -962,8 +962,14 @@ function renderUltimos(){
     const periodo=l.dataFim?
       `${(l.dataIni||l.data).split('-').reverse().join('/')} → ${l.dataFim.split('-').reverse().join('/')}`:
       (l.dataIni||l.data).split('-').reverse().join('/');
-    return`<div class="line-row"><span style="color:var(--text2)">${nomeU} <span style="color:var(--text3);font-size:12px">${periodo}</span></span><span style="font-weight:600">${brl(l.vendas)}</span></div>`;
+    return`<div class="line-row" style="align-items:center;gap:10px"><span style="color:var(--text2)">${nomeU} <span style="color:var(--text3);font-size:12px">${periodo}</span></span><span style="display:flex;align-items:center;gap:12px"><span style="font-weight:600">${brl(l.vendas)}</span><button data-id="${l.id}" data-action="editar-lanc" style="border:none;background:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0;font-weight:500">editar</button><button data-id="${l.id}" data-action="remover-lanc" style="border:none;background:none;color:var(--red);font-size:12px;cursor:pointer;padding:0;font-weight:500">remover</button></span></div>`;
   }).join('');
+  document.getElementById('ultimos-lanc').onclick=function(e){
+    const btn=e.target.closest('button[data-action]');
+    if(!btn)return;
+    if(btn.dataset.action==='editar-lanc') editarLanc(btn.dataset.id);
+    if(btn.dataset.action==='remover-lanc') deletarLanc(btn.dataset.id);
+  };
 }
 
 function salvarLancamento(){
@@ -1302,7 +1308,7 @@ function renderHistorico(){
 function deletarLanc(id){
   if(!confirm('Remover este lançamento?'))return;
   state.lancamentos=state.lancamentos.filter(l=>l.id!==id);
-  save();renderHistorico();toast('Lançamento removido.');
+  save();renderHistorico();renderUltimos();toast('Lançamento removido.');
 }
 
 function renderColabs(){
