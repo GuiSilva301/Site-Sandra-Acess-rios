@@ -376,9 +376,11 @@ function calcMes(colId,ym){
   const a=ajustes(colId,ym);
   const horasExtras=Number(a.horasExtras)||0, valorHE=horasExtras*(Number(col.valorHE)||0);
   const valorDia=fixo/30, faltas=faltasDias*valorDia, outros=Number(a.outrosDescontos)||0;
-  const base=fixo+comissao+bonus+valorHE+cafe+tempo;
-  const liquido=base-inss-vale-faltas-outros;
-  return {col,semanas:ls,vendas,metas,comissao,bonus,horasExtras,valorHE,cafe,tempo,fixo,inss,vale,faltasDias,valorDia,faltas,outros,outrosDesc:a.outrosDesc||'',base,liquido};
+  const itens=(a.itens||[]).filter(i=>Number(i.valor)>0);
+  const receitasExtra=soma(itens.filter(i=>i.tipo==='receita'),i=>i.valor), descontosExtra=soma(itens.filter(i=>i.tipo==='desconto'),i=>i.valor);
+  const base=fixo+comissao+bonus+valorHE+cafe+tempo+receitasExtra;
+  const liquido=base-inss-vale-faltas-outros-descontosExtra;
+  return {col,semanas:ls,vendas,metas,comissao,bonus,horasExtras,valorHE,cafe,tempo,fixo,inss,vale,faltasDias,valorDia,faltas,outros,outrosDesc:a.outrosDesc||'',itens,receitasExtra,descontosExtra,base,liquido};
 }
 // Detalhe dos vales (um por data) e das datas de falta, para o holerite
 function detalheDescontos(r){
@@ -702,33 +704,40 @@ R.fechamento = () => {
           ${r.valorHE?`<div class="ln"><span>Horas extras (${String(r.horasExtras).replace('.',',')} h)</span><span class="money pos">${brl(r.valorHE)}</span></div>`:''}
           ${r.cafe?`<div class="ln"><span>Café</span><span class="money pos">${brl(r.cafe)}</span></div>`:''}
           ${r.tempo?`<div class="ln"><span>Bônus por tempo de casa</span><span class="money pos">${brl(r.tempo)}</span></div>`:''}
+          ${r.itens.filter(i=>i.tipo==='receita').map(i=>`<div class="ln"><span>${esc(i.desc)}</span><span class="money pos">${brl(i.valor)}</span></div>`).join('')}
           <div class="bloco-t">Descontos</div>
           <div class="ln"><span>INSS</span><span class="money neg">− ${brl(r.inss)}</span></div>
           ${dd.vales.length?dd.vales.map(v=>`<div class="ln"><span>Vale em ${v.data}${v.obs?' <span class="muted">('+esc(v.obs)+')</span>':''}</span><span class="money neg">− ${brl(v.valor)}</span></div>`).join(''):`<div class="ln"><span>Vales</span><span class="money neg">− ${brl(0)}</span></div>`}
           <div class="ln"><span>Faltas (${r.faltasDias} dia${r.faltasDias!==1?'s':''} × ${brl(r.valorDia)})${dd.faltas.length?`<br><span class="muted" style="font-size:13px">${dd.faltas.join(', ')}</span>`:''}</span><span class="money neg">− ${brl(r.faltas)}</span></div>
-          ${r.outros?`<div class="ln"><span>Outros${r.outrosDesc?' ('+esc(r.outrosDesc)+')':''}</span><span class="money neg">− ${brl(r.outros)}</span></div>`:''}
+          ${r.outros?`<div class="ln"><span>${r.outrosDesc?esc(r.outrosDesc):'Outros descontos'}</span><span class="money neg">− ${brl(r.outros)}</span></div>`:''}
+          ${r.itens.filter(i=>i.tipo==='desconto').map(i=>`<div class="ln"><span>${esc(i.desc)}</span><span class="money neg">− ${brl(i.valor)}</span></div>`).join('')}
           <div class="ln tot"><span>Salário líquido</span><span class="money">${brl(r.liquido)}</span></div>
           <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn sec sm" onclick="pdfHolerite(['${c.id}'])">${I.pdf}Baixar holerite (PDF)</button></div>
         </div>
         <div>
           <div class="bloco-t">Semanas do mês</div>${sem}
 
-          <form class="ajustes" style="margin-top:16px" onsubmit="event.preventDefault();salvarAjustes('${c.id}',this)">
-            <div class="bloco-t">Ajustes do mês</div>
-            <div class="row3">
-              <label class="field" style="margin-top:6px"><span>Horas extras (horas)</span><input class="inp num" inputmode="decimal" name="he" value="${a.horasExtras?String(a.horasExtras).replace('.',','):''}" placeholder="0"></label>
-              <label class="field" style="margin-top:6px"><span>Outros descontos</span><input class="inp num" inputmode="decimal" name="outros" value="${fmtInp(a.outrosDescontos)}" placeholder="0,00"></label>
+          <div class="ajustes" style="margin-top:16px">
+            <div class="bloco-t">Receitas e descontos do mês</div>
+            ${(r.itens.length||r.outros)?r.itens.map(it=>`<div class="ln"><span>${esc(it.desc)} <span class="tag ${it.tipo==='receita'?'t-ok':'t-bad'}" style="margin-left:4px">${it.tipo==='receita'?'receita':'desconto'}</span></span><span style="display:flex;align-items:center;gap:4px"><span class="money ${it.tipo==='receita'?'pos':'neg'}">${it.tipo==='receita'?'':'− '}${brl(it.valor)}</span><button type="button" class="icon-btn" title="Editar" onclick="formItem('${c.id}','${it.tipo}','${it.id}')">${I.editar}</button><button type="button" class="icon-btn" title="Apagar" onclick="apagarItem('${c.id}','${it.id}')">${I.lixo}</button></span></div>`).join('')
+              + (r.outros?`<div class="ln"><span>${r.outrosDesc?esc(r.outrosDesc):'Outros descontos'} <span class="tag t-bad" style="margin-left:4px">desconto</span></span><span style="display:flex;align-items:center;gap:4px"><span class="money neg">− ${brl(r.outros)}</span><button type="button" class="icon-btn" title="Apagar" onclick="apagarOutrosAntigo('${c.id}')">${I.lixo}</button></span></div>`:'')
+              :'<div class="muted" style="font-size:14px;padding:4px 0">Nada lançado. Use os botões para incluir, por exemplo, salário família ou um desconto.</div>'}
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button type="button" class="btn sec sm" onclick="formItem('${c.id}','receita')">${I.lancar}Adicionar receita</button>
+              <button type="button" class="btn sec sm" onclick="formItem('${c.id}','desconto')">${I.lancar}Adicionar desconto</button>
             </div>
-            <label class="field"><span>Motivo do desconto</span><input class="inp" name="motivo" value="${esc(a.outrosDesc||'')}" placeholder="ex.: adiantamento"></label>
+            <form onsubmit="event.preventDefault();salvarHE('${c.id}',this)" style="display:flex;gap:8px;align-items:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+              <label class="field" style="margin:0;flex:1"><span>Horas extras no mês (horas)</span><input class="inp num" inputmode="decimal" name="he" value="${a.horasExtras?String(a.horasExtras).replace('.',','):''}" placeholder="0"></label>
+              <button class="btn sm">Salvar horas</button>
+            </form>
             ${!Number(c.valorHE)?'<div class="ajuda">O valor da hora extra não está no cadastro dela. Ajuste em Equipe.</div>':''}
-            <button class="btn sm" style="margin-top:12px">Salvar ajustes</button>
-          </form>
+          </div>
         </div>
       </div>
     </div>`;
   }).join('');
   return `
-  <div class="head"><div><h1>Fechamento do mês</h1><p>Holerite de cada pessoa, com o que recebe e o que é descontado. Abra uma pessoa para lançar horas extras e outros descontos.</p></div>
+  <div class="head"><div><h1>Fechamento do mês</h1><p>Holerite de cada pessoa, com o que recebe e o que é descontado. Abra uma pessoa para lançar horas extras, receitas (como salário família) e descontos.</p></div>
     <div class="tools">${seletorMes()}${rs.length?`<button class="btn sec" onclick="pdfHolerite(${JSON.stringify(rs.map(r=>r.col.id)).replace(/"/g,"'")})">${I.pdf}Baixar todos</button>`:''}</div></div>
   <div class="faixa" style="grid-template-columns:repeat(3,1fr)">
     <div><div class="l">Total líquido a pagar</div><div class="v money">${brl(total)}</div><div class="s">${mesNome(ym)}</div></div>
@@ -737,10 +746,28 @@ R.fechamento = () => {
   </div>
   ${hol||'<div class="panel vazio">Ninguém cadastrado ainda.<br><button class="btn" onclick="ir(\'equipe\')">Cadastrar a equipe</button></div>'}`;
 };
-function salvarAjustes(colId,f){
-  state.descontosMes[colId+'_'+V.mes]={horasExtras:num(f.he.value),outrosDescontos:num(f.outros.value),outrosDesc:f.motivo.value.trim()};
-  salvar(); render(); toast('Ajustes salvos');
+function ajustesDe(colId){ const k=colId+'_'+V.mes; state.descontosMes[k]=state.descontosMes[k]||{}; const a=state.descontosMes[k]; a.itens=a.itens||[]; return a; }
+function salvarHE(colId,f){ ajustesDe(colId).horasExtras=num(f.he.value); salvar(); render(); toast('Horas extras salvas'); }
+function formItem(colId,tipo,id){
+  const a=ajustesDe(colId), it=id?a.itens.find(x=>x.id===id):null, rec=tipo==='receita';
+  const c=state.colaboradores.find(x=>x.id===colId);
+  abrirModal({titulo:(id?'Editar ':'Adicionar ')+(rec?'receita':'desconto'),
+    desc:`${esc(c.nome)} · ${mesNome(V.mes)}. O texto aparece no holerite exatamente como for escrito.`,
+    corpo:`<label class="field"><span>Descrição</span><input class="inp" name="desc" maxlength="60" value="${esc(it?.desc||'')}" placeholder="${rec?'ex.: Salário família':'ex.: Adiantamento'}" required></label>
+      <label class="field"><span>Valor</span><input class="inp num" inputmode="decimal" name="valor" value="${it?fmtInp(it.valor):''}" placeholder="0,00" required></label>`,
+    ok: id?'Salvar':(rec?'Adicionar receita':'Adicionar desconto'),
+    aoConfirmar:f=>{
+      const desc=f.desc.value.trim(), valor=num(f.valor.value);
+      if(!desc){ toast('Escreva a descrição.',true); return false; }
+      if(!valor){ toast('Informe o valor.',true); return false; }
+      if(it) Object.assign(it,{desc,valor}); else a.itens.push({id:uid(),tipo,desc,valor});
+      V.abertos[colId]=true; salvar(); render(); toast(rec?(id?'Receita atualizada':'Receita adicionada'):(id?'Desconto atualizado':'Desconto adicionado'));
+    }});
 }
+function apagarItem(colId,id){ const a=ajustesDe(colId), it=a.itens.find(x=>x.id===id); if(!it) return;
+  confirmar('Apagar "'+esc(it.desc)+'"?', `${it.tipo==='receita'?'Receita':'Desconto'} de ${brl(it.valor)} sai do holerite.`, 'Apagar', ()=>{ a.itens=a.itens.filter(x=>x.id!==id); salvar(); render(); toast('Item apagado'); }); }
+function apagarOutrosAntigo(colId){ const a=ajustesDe(colId);
+  confirmar('Apagar este desconto?', `${esc(a.outrosDesc||'Outros descontos')} de ${brl(a.outrosDescontos)} sai do holerite.`, 'Apagar', ()=>{ a.outrosDescontos=0; a.outrosDesc=''; salvar(); render(); toast('Desconto apagado'); }); }
 
 /* ============================ PDF ============================ */
 function pdfHolerite(ids){
@@ -760,10 +787,10 @@ function pdfHolerite(ids){
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110,100,115);
     doc.text(`${r.semanas.filter(l=>!l.tipo).length} semana(s) lancada(s)  |  vendas no mes: ${real(r.vendas)}`,ML,y+5.5); y+=14;
     const sec=t=>{ doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(107,45,92); doc.text(t,ML,y); y+=5.5; };
-    const ln=(a,b,neg)=>{ doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(60,50,65); doc.text(tira(a),ML,y); doc.setTextColor(neg?178:37,neg?58:26,neg?72:43); doc.text((neg?'- ':'')+real(b),MR,y,{align:'right'}); doc.setDrawColor(230,224,232); doc.setLineWidth(0.2); doc.line(ML,y+2,MR,y+2); y+=7; };
+    const ln=(a,b,neg,livre)=>{ doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(60,50,65); doc.text(livre?String(a):tira(a),ML,y); doc.setTextColor(neg?178:37,neg?58:26,neg?72:43); doc.text((neg?'- ':'')+real(b),MR,y,{align:'right'}); doc.setDrawColor(230,224,232); doc.setLineWidth(0.2); doc.line(ML,y+2,MR,y+2); y+=7; };
     sec('A RECEBER'); ln('Salario fixo',r.fixo); ln('Comissoes',r.comissao); ln('Bonus por meta',r.bonus);
-    if(r.valorHE) ln(`Horas extras (${r.horasExtras} h)`,r.valorHE); if(r.cafe) ln('Cafe',r.cafe); if(r.tempo) ln('Bonus por tempo de casa',r.tempo);
-    y+=3; sec('DESCONTOS'); ln('INSS',r.inss,true); const dd=detalheDescontos(r); dd.vales.forEach(v=>ln('Vale em '+v.data+(v.obs?' ('+v.obs+')':''),v.valor,true)); if(r.faltas) ln(`Faltas (${r.faltasDias} dia(s): ${dd.faltas.join(', ')})`,r.faltas,true); if(r.outros) ln('Outros'+(r.outrosDesc?' ('+r.outrosDesc+')':''),r.outros,true);
+    if(r.valorHE) ln(`Horas extras (${r.horasExtras} h)`,r.valorHE); if(r.cafe) ln('Cafe',r.cafe); if(r.tempo) ln('Bonus por tempo de casa',r.tempo); r.itens.filter(i=>i.tipo==='receita').forEach(i=>ln(i.desc,i.valor,false,true));
+    y+=3; sec('DESCONTOS'); ln('INSS',r.inss,true); const dd=detalheDescontos(r); dd.vales.forEach(v=>ln('Vale em '+v.data+(v.obs?' ('+v.obs+')':''),v.valor,true)); if(r.faltas) ln(`Faltas (${r.faltasDias} dia(s): ${dd.faltas.join(', ')})`,r.faltas,true); if(r.outros) ln(r.outrosDesc||'Outros descontos',r.outros,true,true); r.itens.filter(i=>i.tipo==='desconto').forEach(i=>ln(i.desc,i.valor,true,true));
     y+=2; doc.setFillColor(243,233,240); doc.rect(ML,y-5,MR-ML,11,'F');
     doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(37,26,43); doc.text('Salario liquido',ML+3,y+2.5); doc.text(real(r.liquido),MR-3,y+2.5,{align:'right'}); y+=16;
     if(r.semanas.some(l=>!l.tipo)){ sec('SEMANAS DO MES');
