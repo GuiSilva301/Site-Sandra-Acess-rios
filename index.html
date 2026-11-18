@@ -549,7 +549,7 @@ R.lancar = () => {
   if(!cols.length) return `<div class="head"><div><h1>Lançar vendas</h1></div></div><div class="panel vazio">Antes de lançar, cadastre quem vende na loja.<br><button class="btn" onclick="ir('equipe')">Cadastrar a equipe</button></div>`;
   const linhas=cols.map(c=>{
     const l=lancDaSemana(c.id);
-    const meta=l?l.meta:(c.meta||'');
+    const meta=l?l.meta:'';
     return `<div class="linha ${l?'salva':''}" data-col="${c.id}">
       <div class="quem"><span class="pessoa">${av(c)}<span>${esc(c.nome)}${l?'<br><span class="tag t-ok" style="margin-top:3px">já lançado</span>':''}</span></span></div>
       <div><span class="mlbl">Vendas da semana</span><input class="inp num" inputmode="decimal" name="vendas" placeholder="0,00" value="${l?fmtInp(l.vendas):''}" aria-label="Vendas de ${esc(c.nome)}"></div>
@@ -559,7 +559,7 @@ R.lancar = () => {
     </div>`;
   }).join('');
   return `
-  <div class="head"><div><h1>Lançar vendas</h1><p>Escolha a semana e preencha as vendas de cada vendedora. Quem não vendeu pode ficar em branco. A meta já vem do cadastro e pode ser trocada.</p></div></div>
+  <div class="head"><div><h1>Lançar vendas</h1><p>Escolha a semana e preencha as vendas e a meta de cada vendedora. Quem não vendeu pode ficar em branco.</p></div></div>
   <div class="tools" style="margin-bottom:16px">
     <div class="semana"><button class="icon-btn" aria-label="Semana anterior" onclick="moverSemana(-1)">${I.esq}</button><span class="lbl">${brCurto(V.semIni)} a ${brCurto(V.semFim)}</span><button class="icon-btn" aria-label="Próxima semana" onclick="moverSemana(1)">${I.dir}</button></div>
     <button class="btn ghost" onclick="trocarDatas()">Trocar as datas</button>
@@ -606,7 +606,6 @@ function salvarSemana(){
     if(vendas && !meta) erros.push(primeiroNome(col.nome));
     const reg={ id: ex?ex.id:uid(), colId, nomeColab:col.nome, data:V.semIni, dataIni:V.semIni, dataFim:V.semFim, vendas, meta, vale, faltasNum:faltas, falta:faltas>0, obs: ex?.obs||'' };
     if(ex) Object.assign(ex,reg); else state.lancamentos.push(reg);
-    if(meta && !col.meta) col.meta=meta;
     n++;
   });
   if(!n){ toast('Preencha as vendas de pelo menos uma vendedora.',true); return; }
@@ -902,13 +901,13 @@ function apagarFerias(id){ confirmar('Apagar registro de férias?','O registro s
 /* ============================ EQUIPE ============================ */
 R.equipe = () => {
   const lin=c=>`<tr><td><span class="pessoa">${av(c)}<span>${esc(c.nome)}${c.ativo===false?' <span class="tag t-mut">inativa</span>':''}</span></span></td>
-    <td class="n money">${brl(c.salario)}</td><td class="n money hide-m">${c.meta?brl(c.meta):'<span class="muted">—</span>'}</td><td class="n money hide-m">${brl(c.inss)}</td>
+    <td class="n money">${brl(c.salario)}</td><td class="n money hide-m">${brl(c.inss)}</td>
     <td class="act"><button class="btn sec sm" onclick="formColab('${c.id}')">${I.editar}Editar</button></td></tr>`;
   const at=state.colaboradores.filter(c=>c.ativo!==false), in_=state.colaboradores.filter(c=>c.ativo===false);
   return `
-  <div class="head"><div><h1>Equipe</h1><p>Quem trabalha na loja, com salário, meta semanal e descontos fixos. Quem sai ou se afasta pode ser marcada como inativa: o histórico continua guardado.</p></div>
+  <div class="head"><div><h1>Equipe</h1><p>Quem trabalha na loja, com salário e valores fixos do mês. Quem sai ou se afasta pode ser marcada como inativa: o histórico continua guardado.</p></div>
     <div class="tools"><button class="btn" onclick="formColab()">${I.lancar}Adicionar pessoa</button></div></div>
-  <div class="panel">${at.length?`<div class="tw"><table><thead><tr><th>Nome</th><th class="n">Salário fixo</th><th class="n hide-m">Meta semanal</th><th class="n hide-m">INSS</th><th></th></tr></thead><tbody>${at.map(lin).join('')}</tbody></table></div>`:'<div class="vazio">Ninguém cadastrado.<br><button class="btn" onclick="formColab()">Adicionar pessoa</button></div>'}</div>
+  <div class="panel">${at.length?`<div class="tw"><table><thead><tr><th>Nome</th><th class="n">Salário fixo</th><th class="n hide-m">INSS</th><th></th></tr></thead><tbody>${at.map(lin).join('')}</tbody></table></div>`:'<div class="vazio">Ninguém cadastrado.<br><button class="btn" onclick="formColab()">Adicionar pessoa</button></div>'}</div>
   ${in_.length?`<div class="panel"><h2>Inativas</h2><p class="sub">Não aparecem no lançamento de vendas.</p><div class="tw"><table><tbody>${in_.map(lin).join('')}</tbody></table></div></div>`:''}`;
 };
 function formColab(id){
@@ -918,18 +917,16 @@ function formColab(id){
     corpo:`<div class="fg">
       <label class="field full"><span>Nome completo</span><input class="inp" name="nome" value="${esc(c.nome||'')}" required></label>
       <label class="field"><span>Salário fixo (mês)</span><input class="inp num" inputmode="decimal" name="salario" value="${fmtInp(c.salario)}" placeholder="0,00"></label>
-      <label class="field"><span>Meta de vendas (semana)</span><input class="inp num" inputmode="decimal" name="meta" value="${fmtInp(c.meta)}" placeholder="0,00"></label>
       <label class="field"><span>INSS (desconto mensal)</span><input class="inp num" inputmode="decimal" name="inss" value="${fmtInp(c.inss)}" placeholder="0,00"></label>
       <label class="field"><span>Valor da hora extra</span><input class="inp num" inputmode="decimal" name="he" value="${fmtInp(c.valorHE)}" placeholder="0,00"></label>
       <label class="field"><span>Café (mês)</span><input class="inp num" inputmode="decimal" name="cafe" value="${fmtInp(c.cafe)}" placeholder="0,00"></label>
       <label class="field"><span>Bônus por tempo de casa (mês)</span><input class="inp num" inputmode="decimal" name="tempo" value="${fmtInp(c.tempo)}" placeholder="0,00"></label>
     </div>
-    <div class="ajuda">A meta semanal já vem preenchida na tela de lançamento e pode ser trocada em cada semana.</div>
     ${id?`<label class="toggle"><input type="checkbox" name="ativo" ${c.ativo!==false?'checked':''}> Trabalhando na loja (desmarque para inativar)</label>`:''}
     ${id?`<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)"><button type="button" class="btn danger sm" onclick="apagarColab('${id}')">${I.lixo}${temLanc?'Apagar pessoa e lançamentos':'Apagar pessoa'}</button></div>`:''}`,
     aoConfirmar:f=>{
       const nome=f.nome.value.trim(); if(!nome){toast('Informe o nome.',true);return false;}
-      const dados={nome,salario:num(f.salario.value),meta:num(f.meta.value),inss:num(f.inss.value),valorHE:num(f.he.value),cafe:num(f.cafe.value),tempo:num(f.tempo.value),ativo:id?f.ativo.checked:true};
+      const dados={nome,salario:num(f.salario.value),inss:num(f.inss.value),valorHE:num(f.he.value),cafe:num(f.cafe.value),tempo:num(f.tempo.value),ativo:id?f.ativo.checked:true};
       if(id) Object.assign(c,dados); else state.colaboradores.push({id:uid(),...dados});
       salvar(); render(); toast(id?'Cadastro atualizado':'Pessoa adicionada');
     }});
