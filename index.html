@@ -391,6 +391,7 @@ function detalheDescontos(r){
   const faltas=[]; ord.filter(l=>Number(l.faltasNum)>0).forEach(l=>{ if(l.tipo) faltas.push(brCurto(inicioLanc(l))); else faltas.push(l.faltasNum+' na semana de '+brCurto(inicioLanc(l))); });
   return {vales,faltas};
 }
+const comissionados = () => state.colaboradores.filter(c=>c.ativo!==false && c.comissao!==false);
 const ativos = () => state.colaboradores.filter(c=>c.ativo!==false);
 function noMes(ym){ return state.colaboradores.filter(c=>c.ativo!==false || lancsMes(c.id,ym).length || state.descontosMes[c.id+'_'+ym]); }
 
@@ -499,7 +500,7 @@ function faltandoLancar(ym){
   const out=[];
   semanasDoMes(ym).forEach(s=>{
     const fora=c=>{ const ds=new Set(state.ferias.filter(f=>f.colId===c.id).flatMap(diasFerias)); let n=0; for(let i=0;i<7;i++) if(ds.has(addDias(s.ini,i))) n++; return n>=5; };
-    const faltam=ativos().filter(c=>!fora(c) && !state.lancamentos.some(l=>!l.tipo && l.colId===c.id && inicioLanc(l)>=s.ini && inicioLanc(l)<=addDias(s.ini,6)));
+    const faltam=comissionados().filter(c=>!fora(c) && !state.lancamentos.some(l=>!l.tipo && l.colId===c.id && inicioLanc(l)>=s.ini && inicioLanc(l)<=addDias(s.ini,6)));
     if(faltam.length) out.push({...s,faltam});
   });
   return out;
@@ -547,8 +548,8 @@ function moverSemana(n){ V.semIni=addDias(V.semIni,7*n); V.semFim=addDias(V.semF
 function lancDaSemana(colId){ return state.lancamentos.find(l=>!l.tipo && l.colId===colId && inicioLanc(l)===V.semIni); }
 R.lancar = () => {
   if(!V.semIni){ V.semIni=semanaPadrao(); V.semFim=addDias(V.semIni,6); }
-  const cols=ativos();
-  if(!cols.length) return `<div class="head"><div><h1>Lançar vendas</h1></div></div><div class="panel vazio">Antes de lançar, cadastre quem vende na loja.<br><button class="btn" onclick="ir('equipe')">Cadastrar a equipe</button></div>`;
+  const cols=comissionados();
+  if(!cols.length) return `<div class="head"><div><h1>Lançar vendas</h1></div></div><div class="panel vazio">Ninguém da equipe está marcado como "Recebe comissão". Ajuste no cadastro.<br><button class="btn" onclick="ir('equipe')">Cadastrar a equipe</button></div>`;
   const linhas=cols.map(c=>{
     const l=lancDaSemana(c.id);
     const meta=l?l.meta:'';
@@ -929,7 +930,7 @@ function apagarFerias(id){ confirmar('Apagar registro de férias?','O registro s
 
 /* ============================ EQUIPE ============================ */
 R.equipe = () => {
-  const lin=c=>`<tr><td><span class="pessoa">${av(c)}<span>${esc(c.nome)}${c.ativo===false?' <span class="tag t-mut">inativa</span>':''}</span></span></td>
+  const lin=c=>`<tr><td><span class="pessoa">${av(c)}<span>${esc(c.nome)}${c.ativo===false?' <span class="tag t-mut">inativa</span>':''}${c.comissao===false?' <span class="tag t-mut">sem comissão</span>':''}</span></span></td>
     <td class="n money">${brl(c.salario)}</td><td class="n money hide-m">${brl(c.inss)}</td>
     <td class="act"><button class="btn sec sm" onclick="formColab('${c.id}')">${I.editar}Editar</button></td></tr>`;
   const at=state.colaboradores.filter(c=>c.ativo!==false), in_=state.colaboradores.filter(c=>c.ativo===false);
@@ -951,11 +952,12 @@ function formColab(id){
       <label class="field"><span>Café (mês)</span><input class="inp num" inputmode="decimal" name="cafe" value="${fmtInp(c.cafe)}" placeholder="0,00"></label>
       <label class="field"><span>Bônus por tempo de casa (mês)</span><input class="inp num" inputmode="decimal" name="tempo" value="${fmtInp(c.tempo)}" placeholder="0,00"></label>
     </div>
-    ${id?`<label class="toggle"><input type="checkbox" name="ativo" ${c.ativo!==false?'checked':''}> Trabalhando na loja (desmarque para inativar)</label>`:''}
+    <label class="toggle"><input type="checkbox" name="comissao" ${c.comissao!==false?'checked':''}> Recebe comissão (aparece em Lançar vendas)</label>
+    ${id?`<label class="toggle" style="margin-top:10px"><input type="checkbox" name="ativo" ${c.ativo!==false?'checked':''}> Trabalhando na loja (desmarque para inativar)</label>`:''}
     ${id?`<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)"><button type="button" class="btn danger sm" onclick="apagarColab('${id}')">${I.lixo}${temLanc?'Apagar pessoa e lançamentos':'Apagar pessoa'}</button></div>`:''}`,
     aoConfirmar:f=>{
       const nome=f.nome.value.trim(); if(!nome){toast('Informe o nome.',true);return false;}
-      const dados={nome,salario:num(f.salario.value),inss:num(f.inss.value),valorHE:num(f.he.value),cafe:num(f.cafe.value),tempo:num(f.tempo.value),ativo:id?f.ativo.checked:true};
+      const dados={nome,salario:num(f.salario.value),inss:num(f.inss.value),valorHE:num(f.he.value),cafe:num(f.cafe.value),tempo:num(f.tempo.value),comissao:f.comissao.checked,ativo:id?f.ativo.checked:true};
       if(id) Object.assign(c,dados); else state.colaboradores.push({id:uid(),...dados});
       salvar(); render(); toast(id?'Cadastro atualizado':'Pessoa adicionada');
     }});
