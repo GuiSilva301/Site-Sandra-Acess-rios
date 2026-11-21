@@ -378,9 +378,11 @@ function calcMes(colId,ym){
   const valorDia=fixo/30, faltas=faltasDias*valorDia, outros=Number(a.outrosDescontos)||0;
   const itens=(a.itens||[]).filter(i=>Number(i.valor)>0);
   const receitasExtra=soma(itens.filter(i=>i.tipo==='receita'),i=>i.valor), descontosExtra=soma(itens.filter(i=>i.tipo==='desconto'),i=>i.valor);
-  const base=fixo+comissao+bonus+valorHE+cafe+tempo+receitasExtra;
+  const diasAvulsos=ls.filter(l=>l.tipo==='venda').sort((x,y)=>inicioLanc(x).localeCompare(inicioLanc(y)));
+  const pagoDias=soma(diasAvulsos,l=>l.pagoDia);
+  const base=fixo+comissao+bonus+valorHE+cafe+tempo+receitasExtra+pagoDias;
   const liquido=base-inss-vale-faltas-outros-descontosExtra;
-  return {col,semanas:ls,vendas,metas,comissao,bonus,horasExtras,valorHE,cafe,tempo,fixo,inss,vale,faltasDias,valorDia,faltas,outros,outrosDesc:a.outrosDesc||'',itens,receitasExtra,descontosExtra,base,liquido};
+  return {col,semanas:ls,vendas,metas,comissao,bonus,horasExtras,valorHE,cafe,tempo,fixo,inss,vale,faltasDias,valorDia,faltas,outros,outrosDesc:a.outrosDesc||'',itens,receitasExtra,descontosExtra,diasAvulsos,pagoDias,base,liquido};
 }
 // Detalhe dos vales (um por data) e das datas de falta, para o holerite
 function detalheDescontos(r){
@@ -566,6 +568,7 @@ R.lancar = () => {
     <span style="flex:1"></span>
     <button class="btn sec" onclick="formAvulso('vale')">Lançar vale</button>
     <button class="btn sec" onclick="formAvulso('falta')">Lançar falta</button>
+    <button class="btn sec" onclick="formAvulso('venda')">Lançar dia avulso</button>
   </div>
   <form class="folha" id="folha" onsubmit="event.preventDefault();salvarSemana()" oninput="previaFolha()">
     <div class="linha cab"><div>Vendedora</div><div style="text-align:right">Vendas</div><div style="text-align:right">Meta</div><div>Resultado</div><div></div></div>
@@ -573,7 +576,7 @@ R.lancar = () => {
     <div class="rodape"><div id="totFolha" class="muted"></div><button class="btn">Salvar semana</button></div>
   </form>
   <p class="muted" style="font-size:13px;margin-top:12px">Comissão e bônus seguem as <button class="link" onclick="ir('regras')">regras de comissão</button>.</p>
-  ${painelAvulsos(V.semIni,V.semFim,'Vales e faltas desta semana')}`;
+  ${painelAvulsos(V.semIni,V.semFim,'Vales, faltas e dias avulsos desta semana')}`;
 };
 R.lancar_depois = () => previaFolha();
 function previaFolha(){
@@ -616,7 +619,7 @@ function salvarSemana(){
 function apagarLanc(id){
   const l=state.lancamentos.find(x=>x.id===id); if(!l) return;
   const c=state.colaboradores.find(x=>x.id===l.colId);
-  const oque = l.tipo==='vale' ? `Vale de ${brl(l.vale)} para ${esc(c?.nome||l.nomeColab)} em ${br(inicioLanc(l))}.` : l.tipo==='falta' ? `Falta de ${esc(c?.nome||l.nomeColab)} em ${br(inicioLanc(l))}.` : `Vendas de ${esc(c?.nome||l.nomeColab)} na semana de ${br(inicioLanc(l))} (${brl(l.vendas)}).`;
+  const oque = l.tipo==='venda' ? `Dia avulso de ${esc(c?.nome||l.nomeColab)} em ${br(inicioLanc(l))} (vendas ${brl(l.vendas)}).` : l.tipo==='vale' ? `Vale de ${brl(l.vale)} para ${esc(c?.nome||l.nomeColab)} em ${br(inicioLanc(l))}.` : l.tipo==='falta' ? `Falta de ${esc(c?.nome||l.nomeColab)} em ${br(inicioLanc(l))}.` : `Vendas de ${esc(c?.nome||l.nomeColab)} na semana de ${br(inicioLanc(l))} (${brl(l.vendas)}).`;
   confirmar('Apagar lançamento?', oque+' Isso não pode ser desfeito.', 'Apagar', ()=>{
     state.lancamentos=state.lancamentos.filter(x=>x.id!==id); salvar(); render(); toast('Lançamento apagado');
   });
@@ -642,21 +645,24 @@ function editarLanc(id){
     }});
 }
 
-/* ============================ VALE E FALTA EM UMA DATA ============================ */
+/* ============================ VALE, FALTA E DIA AVULSO EM UMA DATA ============================ */
+const tagTipo = t => t==='vale'?'<span class="tag t-warn">Vale</span>':t==='falta'?'<span class="tag t-bad">Falta</span>':'<span class="tag t-mut">Dia avulso</span>';
+const valorAvulso = l => l.tipo==='vale' ? brl(l.vale) : l.tipo==='venda' ? `vendas ${brl(l.vendas)}${Number(l.pagoDia)?' · pago '+brl(l.pagoDia):''}` : '';
 function avulsosEntre(ini,fim){ return state.lancamentos.filter(l=>l.tipo && inicioLanc(l)>=ini && inicioLanc(l)<=fim).sort((a,b)=>inicioLanc(a).localeCompare(inicioLanc(b))); }
 function painelAvulsos(ini,fim,titulo){
   const ls=avulsosEntre(ini,fim);
-  return `<div class="panel" style="margin-top:16px"><h2>${titulo}</h2><p class="sub">Vales e faltas são descontados no fechamento do mês da data lançada.</p>
+  return `<div class="panel" style="margin-top:16px"><h2>${titulo}</h2><p class="sub">Vales e faltas são descontados no fechamento do mês da data lançada. Dias avulsos somam nas vendas, sem comissão.</p>
     ${ls.length?`<div class="tw"><table><tbody>${ls.map(l=>{ const c=state.colaboradores.find(x=>x.id===l.colId)||{id:l.colId,nome:l.nomeColab||'?'};
-      return `<tr><td>${brCurto(inicioLanc(l))}</td><td><span class="pessoa">${av(c)}${nomeR(c)}</span></td><td>${l.tipo==='vale'?'<span class="tag t-warn">Vale</span>':'<span class="tag t-bad">Falta</span>'}${l.obs?` <span class="muted" style="font-size:13px">${esc(l.obs)}</span>`:''}</td>
-      <td class="n money">${l.tipo==='vale'?brl(l.vale):''}</td><td class="act"><button class="icon-btn" title="Editar" onclick="formAvulso('${l.tipo}','${l.id}')">${I.editar}</button><button class="icon-btn" title="Apagar" onclick="apagarLanc('${l.id}')">${I.lixo}</button></td></tr>`; }).join('')}</tbody></table></div>`
-     :'<div class="muted" style="font-size:14px">Nenhum vale ou falta lançado nestes dias.</div>'}</div>`;
+      return `<tr><td>${brCurto(inicioLanc(l))}</td><td><span class="pessoa">${av(c)}${nomeR(c)}</span></td><td>${tagTipo(l.tipo)}${l.obs?` <span class="muted" style="font-size:13px">${esc(l.obs)}</span>`:''}</td>
+      <td class="n money">${valorAvulso(l)}</td><td class="act"><button class="icon-btn" title="Editar" onclick="formAvulso('${l.tipo}','${l.id}')">${I.editar}</button><button class="icon-btn" title="Apagar" onclick="apagarLanc('${l.id}')">${I.lixo}</button></td></tr>`; }).join('')}</tbody></table></div>`
+     :'<div class="muted" style="font-size:14px">Nenhum vale, falta ou dia avulso lançado nestes dias.</div>'}</div>`;
 }
 function formAvulso(tipo,id){
   const l=id?state.lancamentos.find(x=>x.id===id):null;
   const cols=state.colaboradores.filter(c=>c.ativo!==false || (l&&l.colId===c.id));
   if(!cols.length){ toast('Cadastre a equipe primeiro.',true); return; }
   const dataPadrao = l?inicioLanc(l) : (hoje()>=V.semIni && hoje()<=V.semFim ? hoje() : V.semIni||hoje());
+  if(tipo==='venda') return formDiaAvulso(cols,l,id,dataPadrao);
   const vale = tipo==='vale';
   abrirModal({titulo: (id?'Editar ':'Lançar ')+(vale?'vale':'falta'),
     desc: vale?'Valor adiantado em uma data. É descontado do salário no fechamento do mês.':'Um dia de falta. É descontado no fechamento do mês (salário fixo ÷ 30 por dia).',
@@ -676,6 +682,25 @@ function formAvulso(tipo,id){
     }});
 }
 
+function formDiaAvulso(cols,l,id,dataPadrao){
+  abrirModal({titulo:(id?'Editar':'Lançar')+' dia avulso',
+    desc:'Venda de um dia fora da regra (feriado, evento). Soma nas vendas do mês, mas não gera comissão nem conta para a meta.',
+    corpo:`<label class="field"><span>Pessoa</span><select class="inp" name="col">${cols.map(c=>`<option value="${c.id}" ${l&&l.colId===c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select></label>
+      <div class="fg"><label class="field"><span>Data</span><input class="inp" type="date" name="data" value="${dataPadrao}" required></label>
+      <label class="field"><span>Valor vendido no dia</span><input class="inp num" inputmode="decimal" name="valor" value="${l?fmtInp(l.vendas):''}" placeholder="0,00" required></label></div>
+      <label class="field"><span>Valor pago pelo dia (opcional)</span><input class="inp num" inputmode="decimal" name="pago" value="${l?fmtInp(l.pagoDia):''}" placeholder="0,00"></label>
+      <div class="ajuda">Preencha só se esse pagamento deve entrar no holerite. Se já foi pago por fora, deixe em branco.</div>
+      <label class="field"><span>Observação</span><input class="inp" name="obs" value="${esc(l?.obs||'')}" placeholder="ex.: feriado municipal"></label>`,
+    ok:id?'Salvar':'Lançar dia avulso',
+    aoConfirmar:f=>{
+      const colId=f.col.value, col=state.colaboradores.find(c=>c.id===colId), d=f.data.value, vendas=num(f.valor.value), pago=num(f.pago.value);
+      if(!vendas){ toast('Informe o valor vendido no dia.',true); return false; }
+      const reg={id:id||uid(),tipo:'venda',colId,nomeColab:col.nome,data:d,dataIni:d,dataFim:d,vendas,meta:0,vale:0,faltasNum:0,falta:false,pagoDia:pago,obs:f.obs.value.trim()};
+      if(id) state.lancamentos=state.lancamentos.map(x=>x.id===id?reg:x); else state.lancamentos.push(reg);
+      salvar(); render(); toast(id?'Dia avulso atualizado':'Dia avulso lançado');
+    }});
+}
+
 /* ============================ FECHAMENTO DO MÊS ============================ */
 R.fechamento = () => {
   const ym=V.mes, rs=noMes(ym).map(c=>calcMes(c.id,ym));
@@ -685,6 +710,7 @@ R.fechamento = () => {
     const dd=detalheDescontos(r);
     const avs=r.semanas.filter(l=>l.tipo).sort((x,y)=>inicioLanc(x).localeCompare(inicioLanc(y)));
     const avHtml=avs.map(l=>`<div class="ln"><span>${brCurto(inicioLanc(l))} · ${l.tipo==='vale'?'Vale':'Falta'}${l.obs?' <span class="muted">('+esc(l.obs)+')</span>':''}</span><span class="money neg">${l.tipo==='vale'?'− '+brl(l.vale):'− '+brl(r.valorDia)}</span></div>`).join('');
+    const diasHtml=r.diasAvulsos.map(l=>`<div class="ln"><span>${brCurto(inicioLanc(l))} · dia avulso <span class="muted">· vendas ${brl(l.vendas)}, sem comissão${l.obs?' ('+esc(l.obs)+')':''}</span></span><span class="money ${Number(l.pagoDia)?'pos':'muted'}">${Number(l.pagoDia)?brl(l.pagoDia):'—'}</span></div>`).join('');
     const sem=r.semanas.filter(l=>!l.tipo).sort((x,y)=>inicioLanc(x).localeCompare(inicioLanc(y))).map(l=>{
       const cm=comissaoSemana(Number(l.vendas)||0,Number(l.meta)||0)+bonusSemana(Number(l.vendas)||0,Number(l.meta)||0);
       return `<div class="ln"><span>${brCurto(inicioLanc(l))} a ${brCurto(l.dataFim)} <span class="muted">· ${brl(l.vendas)} de ${brl(l.meta)}</span></span><span class="money pos">${brl(cm)}</span></div>`;
@@ -703,6 +729,7 @@ R.fechamento = () => {
           ${r.valorHE?`<div class="ln"><span>Horas extras (${String(r.horasExtras).replace('.',',')} h)</span><span class="money pos">${brl(r.valorHE)}</span></div>`:''}
           ${r.cafe?`<div class="ln"><span>Café</span><span class="money pos">${brl(r.cafe)}</span></div>`:''}
           ${r.tempo?`<div class="ln"><span>Bônus por tempo de casa</span><span class="money pos">${brl(r.tempo)}</span></div>`:''}
+          ${r.diasAvulsos.filter(l=>Number(l.pagoDia)).map(l=>`<div class="ln"><span>Dia avulso ${brCurto(inicioLanc(l))}${l.obs?' <span class="muted">('+esc(l.obs)+')</span>':''}</span><span class="money pos">${brl(l.pagoDia)}</span></div>`).join('')}
           ${r.itens.filter(i=>i.tipo==='receita').map(i=>`<div class="ln"><span>${esc(i.desc)}</span><span class="money pos">${brl(i.valor)}</span></div>`).join('')}
           <div class="bloco-t">Descontos</div>
           <div class="ln"><span>INSS</span><span class="money neg">− ${brl(r.inss)}</span></div>
@@ -715,6 +742,7 @@ R.fechamento = () => {
         </div>
         <div>
           <div class="bloco-t">Semanas do mês</div>${sem}
+          ${diasHtml?`<div class="bloco-t">Dias avulsos</div>${diasHtml}`:''}
 
           <div class="ajustes" style="margin-top:16px">
             <div class="bloco-t">Receitas e descontos do mês</div>
@@ -788,10 +816,11 @@ function pdfHolerite(ids){
     const sec=t=>{ doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(107,45,92); doc.text(t,ML,y); y+=5.5; };
     const ln=(a,b,neg,livre)=>{ doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(60,50,65); doc.text(livre?String(a):tira(a),ML,y); doc.setTextColor(neg?178:37,neg?58:26,neg?72:43); doc.text((neg?'- ':'')+real(b),MR,y,{align:'right'}); doc.setDrawColor(230,224,232); doc.setLineWidth(0.2); doc.line(ML,y+2,MR,y+2); y+=7; };
     sec('A RECEBER'); ln('Salario fixo',r.fixo); ln('Comissoes',r.comissao); ln('Bonus por meta',r.bonus);
-    if(r.valorHE) ln(`Horas extras (${r.horasExtras} h)`,r.valorHE); if(r.cafe) ln('Cafe',r.cafe); if(r.tempo) ln('Bonus por tempo de casa',r.tempo); r.itens.filter(i=>i.tipo==='receita').forEach(i=>ln(i.desc,i.valor,false,true));
+    if(r.valorHE) ln(`Horas extras (${r.horasExtras} h)`,r.valorHE); if(r.cafe) ln('Cafe',r.cafe); if(r.tempo) ln('Bonus por tempo de casa',r.tempo); r.diasAvulsos.filter(l=>Number(l.pagoDia)).forEach(l=>ln('Dia avulso '+brCurto(inicioLanc(l))+(l.obs?' ('+l.obs+')':''),l.pagoDia,false,true)); r.itens.filter(i=>i.tipo==='receita').forEach(i=>ln(i.desc,i.valor,false,true));
     y+=3; sec('DESCONTOS'); ln('INSS',r.inss,true); const dd=detalheDescontos(r); dd.vales.forEach(v=>ln('Vale em '+v.data+(v.obs?' ('+v.obs+')':''),v.valor,true)); if(r.faltas) ln(`Faltas (${r.faltasDias} dia(s): ${dd.faltas.join(', ')})`,r.faltas,true); if(r.outros) ln(r.outrosDesc||'Outros descontos',r.outros,true,true); r.itens.filter(i=>i.tipo==='desconto').forEach(i=>ln(i.desc,i.valor,true,true));
     y+=2; doc.setFillColor(243,233,240); doc.rect(ML,y-5,MR-ML,11,'F');
     doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(37,26,43); doc.text('Salario liquido',ML+3,y+2.5); doc.text(real(r.liquido),MR-3,y+2.5,{align:'right'}); y+=16;
+    if(r.diasAvulsos.length){ sec('DIAS AVULSOS (SEM COMISSAO)'); r.diasAvulsos.forEach(l=>{ doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(60,50,65); doc.text(`${br(inicioLanc(l))}   vendas ${real(l.vendas)}${l.obs?'  ('+l.obs+')':''}`,ML,y); y+=5.5; }); y+=3; }
     if(r.semanas.some(l=>!l.tipo)){ sec('SEMANAS DO MES');
       r.semanas.filter(l=>!l.tipo).sort((x,z)=>inicioLanc(x).localeCompare(inicioLanc(z))).forEach(l=>{
         const cm=comissaoSemana(Number(l.vendas)||0,Number(l.meta)||0)+bonusSemana(Number(l.vendas)||0,Number(l.meta)||0);
@@ -819,8 +848,8 @@ R.historico = () => {
   const linhas=ls.map(l=>{
     const c=state.colaboradores.find(x=>x.id===l.colId)||{id:l.colId,nome:l.nomeColab||'?'};
     const v=Number(l.vendas)||0, m=Number(l.meta)||0, cm=comissaoSemana(v,m)+bonusSemana(v,m);
-    if(l.tipo) return `<tr><td>${br(inicioLanc(l))}</td><td><span class="pessoa">${av(c)}${nomeR(c)}</span></td><td class="n">${l.tipo==='vale'?'<span class="tag t-warn">Vale</span>':'<span class="tag t-bad">Falta</span>'}</td><td class="hide-m"></td><td class="hide-m"></td>
-      <td class="n hide-m">${l.tipo==='vale'?brl(l.vale):''}${l.obs?` <span class="muted" style="font-size:13px">${esc(l.obs)}</span>`:''}</td>
+    if(l.tipo) return `<tr><td>${br(inicioLanc(l))}</td><td><span class="pessoa">${av(c)}${nomeR(c)}</span></td><td class="n">${l.tipo==='venda'?`<span class="money">${brl(l.vendas)}</span> `:''}${tagTipo(l.tipo)}</td><td class="hide-m"></td><td class="n hide-m">${l.tipo==='venda'?'<span class="muted">sem comissão</span>':''}</td>
+      <td class="n hide-m">${l.tipo==='vale'?brl(l.vale):l.tipo==='venda'&&Number(l.pagoDia)?'pago '+brl(l.pagoDia):''}${l.obs?` <span class="muted" style="font-size:13px">${esc(l.obs)}</span>`:''}</td>
       <td class="act"><button class="icon-btn" title="Editar" onclick="editarLanc('${l.id}')">${I.editar}</button><button class="icon-btn" title="Apagar" onclick="apagarLanc('${l.id}')">${I.lixo}</button></td></tr>`;
     return `<tr><td>${brCurto(inicioLanc(l))} a ${brCurto(l.dataFim)}</td><td><span class="pessoa">${av(c)}${nomeR(c)}</span></td>
       <td class="n money">${brl(v)}</td><td class="n hide-m">${m?pct(v/m*100):'<span class="muted">—</span>'}</td><td class="n money pos hide-m">${brl(cm)}</td>
