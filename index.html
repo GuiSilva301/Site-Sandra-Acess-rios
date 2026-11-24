@@ -393,7 +393,9 @@ function detalheDescontos(r){
 }
 const comissionados = () => state.colaboradores.filter(c=>c.ativo!==false && c.comissao!==false);
 const ativos = () => state.colaboradores.filter(c=>c.ativo!==false);
-function noMes(ym){ return state.colaboradores.filter(c=>c.ativo!==false || lancsMes(c.id,ym).length || state.descontosMes[c.id+'_'+ym]); }
+function noMes(ym){ return state.colaboradores.filter(c=>c.folha!==false && (c.ativo!==false || lancsMes(c.id,ym).length || state.descontosMes[c.id+'_'+ym])); }
+const semComissao = () => state.colaboradores.filter(c=>c.ativo!==false && c.comissao===false);
+function faturamentoMes(ym){ return soma(state.lancamentos.filter(l=>l.tipo!=='vale' && l.tipo!=='falta' && inicioLanc(l).startsWith(ym)), l=>l.vendas); }
 
 /* ============================ DADOS ============================ */
 function normalizar(s){
@@ -508,7 +510,8 @@ function faltandoLancar(ym){
 R.inicio = () => {
   const ym=V.mes, cols=noMes(ym), rs=cols.map(c=>calcMes(c.id,ym));
   const vendas=soma(rs,r=>r.vendas), metas=soma(rs,r=>r.metas), vendasComMeta=soma(rs,r=>soma(r.semanas,l=>Number(l.meta)?l.vendas:0)), com=soma(rs,r=>r.comissao+r.bonus), folha=soma(rs,r=>r.liquido);
-  const falt=faltandoLancar(ym);
+  const falt=faltandoLancar(ym), fat=faturamentoMes(ym);
+  const foraFolha=state.colaboradores.filter(c=>c.folha===false).map(c=>({c,v:soma(lancsMes(c.id,ym).filter(l=>l.tipo!=='vale'&&l.tipo!=='falta'),l=>l.vendas)})).filter(x=>x.v);
   const linhas=rs.map(r=>{
     const p=r.metas?r.vendas/r.metas*100:null;
     return `<tr><td><span class="pessoa">${av(r.col)}${nomeR(r.col)}</span></td>
@@ -523,17 +526,17 @@ R.inicio = () => {
   ${falt.length?`<div class="aviso">${I.ferias}<div><b>Faltam lançamentos</b>${falt.map(s=>`Semana de ${brCurto(s.ini)} a ${brCurto(s.fim)}: ${s.faltam.map(c=>esc(primeiroNome(c.nome))).join(', ')}. <button class="link" onclick="irSemana('${s.ini}')">Lançar agora</button>`).join('<br>')}</div></div>`
    : (semanasDoMes(ym).length?`<div class="aviso ok">${I.fechamento}<div><b>Lançamentos em dia</b>Todas as semanas encerradas deste mês já foram lançadas.</div></div>`:'')}
   <div class="faixa">
-    <div><div class="l">Vendas da equipe</div><div class="v money">${brl(vendas)}</div><div class="s">${metas?pct(vendasComMeta/metas*100)+' da meta (semanas com meta)':'sem metas lançadas'}</div></div>
-    <div><div class="l">Comissões e bônus</div><div class="v money">${brl(com)}</div><div class="s">${vendas?(com/vendas*100).toFixed(1).replace('.',',')+'% das vendas':'—'}</div></div>
+    <div><div class="l">Faturamento do mês</div><div class="v money">${brl(fat)}</div><div class="s">${metas?pct(vendasComMeta/metas*100)+' da meta (semanas com meta)':'todas as vendas lançadas'}</div></div>
+    <div><div class="l">Comissões e bônus</div><div class="v money">${brl(com)}</div><div class="s">${fat?(com/fat*100).toFixed(1).replace('.',',')+'% do faturamento':'—'}</div></div>
     <div><div class="l">Folha do mês</div><div class="v money">${brl(folha)}</div><div class="s">líquido a pagar</div></div>
     <div><div class="l">Semanas lançadas</div><div class="v money">${state.lancamentos.filter(l=>!l.tipo && inicioLanc(l).startsWith(ym)).length}</div><div class="s">lançamentos no mês</div></div>
   </div>
   <div class="panel"><h2>Equipe</h2><p class="sub">Comissão e bônus somam todas as semanas que começam neste mês.</p>
-    ${rs.length?`<div class="tw"><table class="click"><thead><tr><th>Vendedora</th><th class="n">Vendas</th><th class="n hide-m">Meta atingida</th><th class="n hide-m">Comissão + bônus</th><th class="n">Líquido</th></tr></thead><tbody>${linhas}</tbody></table></div>`
+    ${rs.length?`<div class="tw"><table class="click"><thead><tr><th>Vendedora</th><th class="n">Vendas</th><th class="n hide-m">Meta atingida</th><th class="n hide-m">Comissão + bônus</th><th class="n">Líquido</th></tr></thead><tbody>${linhas}${foraFolha.map(x=>`<tr><td><span class="pessoa">${av(x.c)}${nomeR(x.c)}</span></td><td class="n money">${brl(x.v)}</td><td class="n hide-m"><span class="muted">sem comissão</span></td><td class="n hide-m"></td><td class="n muted">fora da folha</td></tr>`).join('')}</tbody></table></div>`
      :`<div class="vazio">Ninguém cadastrado ainda.<br><button class="btn" onclick="ir('equipe')">Cadastrar a equipe</button></div>`}
   </div>`;
 };
-R.inicio_depois = () => { document.querySelectorAll('table.click tbody tr').forEach((tr,i)=>{ tr.style.cursor='pointer'; tr.onclick=()=>{ const c=noMes(V.mes)[i]; V.abertos={[c.id]:true}; ir('fechamento'); }; }); };
+R.inicio_depois = () => { const n=noMes(V.mes).length; document.querySelectorAll('table.click tbody tr').forEach((tr,i)=>{ if(i>=n) return; tr.style.cursor='pointer'; tr.onclick=()=>{ const c=noMes(V.mes)[i]; V.abertos={[c.id]:true}; ir('fechamento'); }; }); };
 function seletorMes(){
   return `<div class="semana"><button class="icon-btn" aria-label="Mês anterior" onclick="V.mes=somaMes(V.mes,-1);render()">${I.esq}</button><span class="lbl" style="min-width:150px">${mesNomeCap(V.mes)}</span><button class="icon-btn" aria-label="Próximo mês" onclick="V.mes=somaMes(V.mes,1);render()">${I.dir}</button></div>`;
 }
@@ -561,6 +564,16 @@ R.lancar = () => {
       <div class="rm">${l?`<button type="button" class="icon-btn" title="Apagar o lançamento desta semana" onclick="apagarLanc('${l.id}')">${I.lixo}</button>`:''}</div>
     </div>`;
   }).join('');
+  const linhasSem=semComissao().map(c=>{
+    const l=lancDaSemana(c.id);
+    return `<div class="linha ${l?'salva':''}" data-col="${c.id}" data-semcom="1">
+      <div class="quem"><span class="pessoa">${av(c)}<span>${esc(c.nome)}${l?'<br><span class="tag t-ok" style="margin-top:3px">já lançado</span>':''}</span></span></div>
+      <div><span class="mlbl">Vendas da semana</span><input class="inp num" inputmode="decimal" name="vendas" placeholder="0,00" value="${l?fmtInp(l.vendas):''}" aria-label="Vendas de ${esc(c.nome)}"></div>
+      <div></div>
+      <div class="barra"><span class="muted" style="font-size:13px">sem comissão</span></div>
+      <div class="rm">${l?`<button type="button" class="icon-btn" title="Apagar o lançamento desta semana" onclick="apagarLanc('${l.id}')">${I.lixo}</button>`:''}</div>
+    </div>`;
+  }).join('');
   return `
   <div class="head"><div><h1>Lançar vendas</h1><p>Escolha a semana e preencha as vendas e a meta de cada vendedora. Quem não vendeu pode ficar em branco.</p></div></div>
   <div class="tools" style="margin-bottom:16px">
@@ -574,6 +587,7 @@ R.lancar = () => {
   <form class="folha" id="folha" onsubmit="event.preventDefault();salvarSemana()" oninput="previaFolha()">
     <div class="linha cab"><div>Vendedora</div><div style="text-align:right">Vendas</div><div style="text-align:right">Meta</div><div>Resultado</div><div></div></div>
     ${linhas}
+    ${linhasSem?`<div class="linha cab"><div>Vendas sem comissão</div><div style="text-align:right">Vendas</div><div></div><div>Entra só no faturamento</div><div></div></div>${linhasSem}`:''}
     <div class="rodape"><div id="totFolha" class="muted"></div><button class="btn">Salvar semana</button></div>
   </form>
   <p class="muted" style="font-size:13px;margin-top:12px">Comissão e bônus seguem as <button class="link" onclick="ir('regras')">regras de comissão</button>.</p>
@@ -583,7 +597,9 @@ R.lancar_depois = () => previaFolha();
 function previaFolha(){
   let tv=0,tc=0;
   document.querySelectorAll('#folha .linha[data-col]').forEach(row=>{
-    const v=num(row.querySelector('[name=vendas]').value), m=num(row.querySelector('[name=meta]').value);
+    const v=num(row.querySelector('[name=vendas]').value);
+    if(row.dataset.semcom){ tv+=v; return; }
+    const m=num(row.querySelector('[name=meta]').value);
     tv+=v; const com=comissaoSemana(v,m)+bonusSemana(v,m); tc+=com;
     const mr=m?metasReais(m):null, nv=nivelAtingido(v,m);
     const prox = mr && nv<3 ? mr[nv] : null;
@@ -603,11 +619,12 @@ function salvarSemana(){
   let n=0, erros=[];
   document.querySelectorAll('#folha .linha[data-col]').forEach(row=>{
     const colId=row.dataset.col, col=state.colaboradores.find(c=>c.id===colId);
-    const vendas=num(row.querySelector('[name=vendas]').value), meta=num(row.querySelector('[name=meta]').value);
+    const semcom=!!row.dataset.semcom;
+    const vendas=num(row.querySelector('[name=vendas]').value), meta=semcom?0:num(row.querySelector('[name=meta]').value);
     const ex=lancDaSemana(colId);
     const vale=ex?Number(ex.vale)||0:0, faltas=ex?Number(ex.faltasNum)||0:0;
     if(!vendas){ return; }
-    if(vendas && !meta) erros.push(primeiroNome(col.nome));
+    if(vendas && !meta && !semcom) erros.push(primeiroNome(col.nome));
     const reg={ id: ex?ex.id:uid(), colId, nomeColab:col.nome, data:V.semIni, dataIni:V.semIni, dataFim:V.semFim, vendas, meta, vale, faltasNum:faltas, falta:faltas>0, obs: ex?.obs||'' };
     if(ex) Object.assign(ex,reg); else state.lancamentos.push(reg);
     n++;
@@ -930,7 +947,7 @@ function apagarFerias(id){ confirmar('Apagar registro de férias?','O registro s
 
 /* ============================ EQUIPE ============================ */
 R.equipe = () => {
-  const lin=c=>`<tr><td><span class="pessoa">${av(c)}<span>${esc(c.nome)}${c.ativo===false?' <span class="tag t-mut">inativa</span>':''}${c.comissao===false?' <span class="tag t-mut">sem comissão</span>':''}</span></span></td>
+  const lin=c=>`<tr><td><span class="pessoa">${av(c)}<span>${esc(c.nome)}${c.ativo===false?' <span class="tag t-mut">inativa</span>':''}${c.comissao===false?' <span class="tag t-mut">sem comissão</span>':''}${c.folha===false?' <span class="tag t-mut">fora da folha</span>':''}</span></span></td>
     <td class="n money">${brl(c.salario)}</td><td class="n money hide-m">${brl(c.inss)}</td>
     <td class="act"><button class="btn sec sm" onclick="formColab('${c.id}')">${I.editar}Editar</button></td></tr>`;
   const at=state.colaboradores.filter(c=>c.ativo!==false), in_=state.colaboradores.filter(c=>c.ativo===false);
@@ -952,12 +969,14 @@ function formColab(id){
       <label class="field"><span>Café (mês)</span><input class="inp num" inputmode="decimal" name="cafe" value="${fmtInp(c.cafe)}" placeholder="0,00"></label>
       <label class="field"><span>Bônus por tempo de casa (mês)</span><input class="inp num" inputmode="decimal" name="tempo" value="${fmtInp(c.tempo)}" placeholder="0,00"></label>
     </div>
-    <label class="toggle"><input type="checkbox" name="comissao" ${c.comissao!==false?'checked':''}> Recebe comissão (aparece em Lançar vendas)</label>
+    <label class="toggle"><input type="checkbox" name="comissao" ${c.comissao!==false?'checked':''}> Recebe comissão (tem meta e comissão em Lançar vendas)</label>
+    <label class="toggle" style="margin-top:10px"><input type="checkbox" name="folha" ${c.folha!==false?'checked':''}> Recebe salário pela loja (aparece no Fechamento do mês)</label>
+    <div class="ajuda">Para a dona ou quem só registra vendas, desmarque as duas: as vendas entram no faturamento, sem comissão e sem holerite.</div>
     ${id?`<label class="toggle" style="margin-top:10px"><input type="checkbox" name="ativo" ${c.ativo!==false?'checked':''}> Trabalhando na loja (desmarque para inativar)</label>`:''}
     ${id?`<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)"><button type="button" class="btn danger sm" onclick="apagarColab('${id}')">${I.lixo}${temLanc?'Apagar pessoa e lançamentos':'Apagar pessoa'}</button></div>`:''}`,
     aoConfirmar:f=>{
       const nome=f.nome.value.trim(); if(!nome){toast('Informe o nome.',true);return false;}
-      const dados={nome,salario:num(f.salario.value),inss:num(f.inss.value),valorHE:num(f.he.value),cafe:num(f.cafe.value),tempo:num(f.tempo.value),comissao:f.comissao.checked,ativo:id?f.ativo.checked:true};
+      const dados={nome,salario:num(f.salario.value),inss:num(f.inss.value),valorHE:num(f.he.value),cafe:num(f.cafe.value),tempo:num(f.tempo.value),comissao:f.comissao.checked,folha:f.folha.checked,ativo:id?f.ativo.checked:true};
       if(id) Object.assign(c,dados); else state.colaboradores.push({id:uid(),...dados});
       salvar(); render(); toast(id?'Cadastro atualizado':'Pessoa adicionada');
     }});
