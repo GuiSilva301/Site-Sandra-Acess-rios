@@ -511,6 +511,8 @@ R.inicio = () => {
   const ym=V.mes, cols=noMes(ym), rs=cols.map(c=>calcMes(c.id,ym));
   const vendas=soma(rs,r=>r.vendas), metas=soma(rs,r=>r.metas), vendasComMeta=soma(rs,r=>soma(r.semanas,l=>Number(l.meta)?l.vendas:0)), com=soma(rs,r=>r.comissao+r.bonus), folha=soma(rs,r=>r.liquido);
   const falt=faltandoLancar(ym), fat=faturamentoMes(ym);
+  const lsSem=state.lancamentos.filter(l=>!l.tipo && inicioLanc(l).startsWith(ym));
+  const semLanc=new Set(lsSem.map(l=>segunda(inicioLanc(l)))).size, semEnc=semanasDoMes(ym).length, nLanc=lsSem.length;
   const foraFolha=state.colaboradores.filter(c=>c.folha===false).map(c=>({c,v:soma(lancsMes(c.id,ym).filter(l=>l.tipo!=='vale'&&l.tipo!=='falta'),l=>l.vendas)})).filter(x=>x.v);
   const linhas=rs.map(r=>{
     const p=r.metas?r.vendas/r.metas*100:null;
@@ -529,7 +531,7 @@ R.inicio = () => {
     <div><div class="l">Faturamento do mês</div><div class="v money">${brl(fat)}</div><div class="s">${metas?pct(vendasComMeta/metas*100)+' da meta (semanas com meta)':'todas as vendas lançadas'}</div></div>
     <div><div class="l">Comissões e bônus</div><div class="v money">${brl(com)}</div><div class="s">${fat?(com/fat*100).toFixed(1).replace('.',',')+'% do faturamento':'—'}</div></div>
     <div><div class="l">Folha do mês</div><div class="v money">${brl(folha)}</div><div class="s">líquido a pagar</div></div>
-    <div><div class="l">Semanas lançadas</div><div class="v money">${state.lancamentos.filter(l=>!l.tipo && inicioLanc(l).startsWith(ym)).length}</div><div class="s">lançamentos no mês</div></div>
+    <div><div class="l">Semanas lançadas</div><div class="v money">${semLanc}${semEnc?` de ${semEnc}`:''}</div><div class="s">${semEnc?'semanas encerradas no mês · ':''}${nLanc} lançamento${nLanc!==1?'s':''}</div></div>
   </div>
   <div class="panel"><h2>Equipe</h2><p class="sub">Comissão e bônus somam todas as semanas que começam neste mês.</p>
     ${rs.length?`<div class="tw"><table class="click"><thead><tr><th>Vendedora</th><th class="n">Vendas</th><th class="n hide-m">Meta atingida</th><th class="n hide-m">Comissão + bônus</th><th class="n">Líquido</th></tr></thead><tbody>${linhas}${foraFolha.map(x=>`<tr><td><span class="pessoa">${av(x.c)}${nomeR(x.c)}</span></td><td class="n money">${brl(x.v)}</td><td class="n hide-m"><span class="muted">sem comissão</span></td><td class="n hide-m"></td><td class="n muted">fora da folha</td></tr>`).join('')}</tbody></table></div>`
